@@ -1,5 +1,21 @@
 name: Deploy Pages
 
+# Fast path for hand-edited landing + demo pages, skipping the full
+# font build. Scaffold is the sole authority for fonts.noisefactor.io
+# deploys: this workflow just fires the workflow_dispatch at scaffold's
+# static-site-release, which clones this repo at the pushed SHA, stages
+# index.html + demo/, rsyncs to ~/sites/fonts.noisefactor.io/content on
+# nf-toronto, flushes the CDN edges, and verifies through the edge.
+#
+# Keeping the SSH key + server IP on the scaffold side means this
+# public repo carries no deploy secrets — only the EHSRE app private
+# key, which is scoped to dispatching scaffold workflows.
+#
+# The deploy is deliberately not --delete: the same content root also
+# holds the full site build (fontaine-site) and the versioned font
+# bundle (fontaine-bundle). Scaffold serializes all three arms in one
+# concurrency group.
+
 on:
   push:
     branches:
@@ -8,53 +24,39 @@ on:
       - 'index.html'
       - 'example.html'
       - 'font-loader.js'
+      - '.github/workflows/deploy-pages.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: deploy-pages-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  deploy-pages:
+  trigger-scaffold-release:
+    name: Dispatch scaffold static-site-release
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-
-      - name: Build site pages
-        run: |
-          mkdir -p dist/site/demo
-          cp index.html dist/site/index.html
-          cp example.html dist/site/demo/index.html
-          cp font-loader.js dist/site/demo/font-loader.js
-
-      - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          echo "${{ secrets.SCAFFOLD_SSH_KEY }}" | base64 -d > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan ${{ secrets.SCAFFOLD_SERVER_IP }} >> ~/.ssh/known_hosts 2>/dev/null
-
-      - name: Deploy pages only
-        run: |
-          DEST="deploy@${{ secrets.SCAFFOLD_SERVER_IP }}:~/sites/fonts.noisefactor.io/content/"
-          rsync -avz dist/site/index.html "$DEST"
-          rsync -avz dist/site/demo/ "${DEST}demo/"
-
-      - name: Generate app token
-        if: success()
+      - name: Mint scaffold GitHub App token
         id: app-token
         uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
         with:
           app-id: 2959521
           private-key: ${{ secrets.EHSRE_APP_PRIVATE_KEY }}
           owner: noisefactorllc
+          repositories: scaffold
 
-      - name: Purge CDN cache
-        if: success()
+      - name: Dispatch scaffold static-site-release for fontaine pages
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          curl -sf -X POST https://api.github.com/repos/noisefactorllc/scaffold/dispatches \
-            -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -d '{"event_type":"cdn-purge","client_payload":{"domain":"fonts.noisefactor.io"}}'
+          gh workflow run static-site-release.yml \
+            --repo noisefactorllc/scaffold \
+            --ref main \
+            -f site=fontaine-pages \
+            -f sha=${{ github.sha }}
+          echo "Dispatched scaffold static-site-release for fontaine-pages @ ${{ github.sha }}"

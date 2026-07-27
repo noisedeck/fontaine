@@ -1,5 +1,24 @@
 name: Deploy Site (Full Rebuild)
 
+# Full site rebuild: downloads the font catalogue, converts to WOFF2,
+# builds the block fonts and the site. Scaffold is the sole authority
+# for fonts.noisefactor.io deploys, so the build itself now runs there
+# — this workflow just fires the workflow_dispatch at scaffold's
+# static-site-release, which clones this repo at the tagged SHA, runs
+# that same build, rsyncs dist/site/ (excluding bundle/) to
+# ~/sites/fonts.noisefactor.io/content on nf-toronto, flushes the CDN
+# edges, and verifies through the edge.
+#
+# Keeping the SSH key + server IP on the scaffold side means this
+# public repo carries no deploy secrets — only the EHSRE app private
+# key, which is scoped to dispatching scaffold workflows.
+#
+# The deploy is deliberately not --delete and excludes bundle/: the
+# same content root also holds the versioned font bundle, which
+# fontaine-bundle owns. Scaffold serializes all three fontaine arms in
+# one concurrency group, so the tag push that fires both this and
+# release.yml no longer races them against one content root.
+
 on:
   push:
     tags:
@@ -10,75 +29,27 @@ permissions:
   contents: read
 
 jobs:
-  deploy-site:
+  trigger-scaffold-release:
+    name: Dispatch scaffold static-site-release
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
-
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: pip install fonttools brotli tqdm
-
-      - name: Cache font downloads
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: |
-            dist
-            .build
-            .build-block
-          key: fonts-${{ hashFiles('download_fonts.py', 'build_block_fonts.py') }}
-
-      - name: Download fonts
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python download_fonts.py
-
-      - name: Convert to WOFF2
-        run: |
-          python -c "
-          from build_bundle import build_woff2_fonts
-          build_woff2_fonts()
-          "
-
-      - name: Build block fonts
-        run: python build_block_fonts.py
-
-      - name: Build site bundle
-        run: python build_site.py
-
-      - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          echo "${{ secrets.SCAFFOLD_SSH_KEY }}" | base64 -d > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan ${{ secrets.SCAFFOLD_SERVER_IP }} >> ~/.ssh/known_hosts 2>/dev/null
-
-      - name: Deploy site to scaffold
-        run: |
-          rsync -avz --exclude 'bundle/' \
-            dist/site/ \
-            deploy@${{ secrets.SCAFFOLD_SERVER_IP }}:~/sites/fonts.noisefactor.io/content/
-
-      - name: Generate app token
-        if: success()
+      - name: Mint scaffold GitHub App token
         id: app-token
         uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
         with:
           app-id: 2959521
           private-key: ${{ secrets.EHSRE_APP_PRIVATE_KEY }}
           owner: noisefactorllc
+          repositories: scaffold
 
-      - name: Purge CDN cache
-        if: success()
+      - name: Dispatch scaffold static-site-release for fontaine site
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          curl -sf -X POST https://api.github.com/repos/noisefactorllc/scaffold/dispatches \
-            -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -d '{"event_type":"cdn-purge","client_payload":{"domain":"fonts.noisefactor.io"}}'
+          gh workflow run static-site-release.yml \
+            --repo noisefactorllc/scaffold \
+            --ref main \
+            -f site=fontaine-site \
+            -f sha=${{ github.sha }}
+          echo "Dispatched scaffold static-site-release for fontaine-site @ ${{ github.sha }}"

@@ -116,28 +116,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Prepare bundle directory
-        run: |
-          mkdir -p dist/bundle
-          cp bundle/fonts.zip dist/bundle/
-          cp bundle/fonts.json dist/bundle/
-          cp bundle/manifest.json dist/bundle/
-          cp font-loader.js dist/bundle/
-
-      - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          echo "${{ secrets.SCAFFOLD_SSH_KEY }}" | base64 -d > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan ${{ secrets.SCAFFOLD_SERVER_IP }} >> ~/.ssh/known_hosts 2>/dev/null
-
-      - name: Deploy bundle to scaffold
-        run: |
-          rsync -avz \
-            dist/bundle/ \
-            deploy@${{ secrets.SCAFFOLD_SERVER_IP }}:~/sites/fonts.noisefactor.io/content/bundle/
-
       - name: Generate app token
         if: success()
         id: app-token
@@ -146,11 +124,29 @@ jobs:
           app-id: 2959521
           private-key: ${{ secrets.EHSRE_APP_PRIVATE_KEY }}
           owner: noisefactorllc
+          repositories: scaffold
 
-      - name: Purge CDN cache
+      - name: Dispatch scaffold static-site-release for the font bundle
         if: success()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        # Scaffold is the sole authority for fonts.noisefactor.io
+        # deploys: it clones this repo at the tagged SHA, rebuilds the
+        # bundle, rsyncs it into content/bundle/, flushes the CDN edges
+        # and verifies through the edge. This repo keeps no deploy
+        # secrets — only the EHSRE app key, scoped to dispatching
+        # scaffold workflows.
+        #
+        # Note the bundle is therefore built twice from one tag: once
+        # here for the GitHub Release assets above, once on scaffold
+        # for the CDN. download_fonts.py tracks upstream "latest"
+        # releases and manifest.json stamps a build timestamp, so the
+        # two are same-SHA but not byte-identical. The Release asset is
+        # the pinned download; the CDN copy is the live one.
         run: |
-          curl -sf -X POST https://api.github.com/repos/noisefactorllc/scaffold/dispatches \
-            -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -d '{"event_type":"cdn-purge","client_payload":{"domain":"fonts.noisefactor.io"}}'
+          gh workflow run static-site-release.yml \
+            --repo noisefactorllc/scaffold \
+            --ref main \
+            -f site=fontaine-bundle \
+            -f sha=${{ github.sha }}
+          echo "Dispatched scaffold static-site-release for fontaine-bundle @ ${{ github.sha }}"
