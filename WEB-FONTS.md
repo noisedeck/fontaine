@@ -111,6 +111,7 @@ Add a placeholder font `@font-face` rule and include it in your fallback chain:
   src: url('https://fonts.noisefactor.io/fonts/inter/Inter-Blank.woff2') format('woff2');
   font-weight: 400;
   font-style: normal;
+  font-display: block;
 }
 
 /* Block style: visible solid placeholder (useful during development) */
@@ -119,12 +120,17 @@ Add a placeholder font `@font-face` rule and include it in your fallback chain:
   src: url('https://fonts.noisefactor.io/fonts/inter/Inter-Block.woff2') format('woff2');
   font-weight: 400;
   font-style: normal;
+  font-display: block;
 }
 
 body {
   font-family: 'Inter', 'Inter Blank';
 }
 ```
+
+Use `font-display: block` on placeholder faces so a metric-mismatched system
+fallback never flashes while the placeholder itself loads. Placeholders are
+small (~3-15KB) and usually preloaded, so the block period is momentary.
 
 Placeholder fonts follow the naming patterns:
 - `{FontName}-Block.woff2` (solid rectangles)
