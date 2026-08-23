@@ -68,15 +68,20 @@ class FontLoader {
     });
   }
 
-  async getInstalledVersion() {
+  async getInstalledBundleMetadata() {
     const db = await this.openDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction('meta', 'readonly');
       const store = tx.objectStore('meta');
       const request = store.get('version');
-      request.onsuccess = () => resolve(request.result?.value || null);
+      request.onsuccess = () => resolve(request.result || null);
       request.onerror = () => reject(request.error);
     });
+  }
+
+  async getInstalledVersion() {
+    const metadata = await this.getInstalledBundleMetadata();
+    return metadata?.value || null;
   }
 
   async setInstalledVersion(version, versionDate, bundleSha256) {
@@ -163,9 +168,13 @@ class FontLoader {
     const bundleVersion = manifest.version;
 
     // Check if update needed
-    this.installedVersion = await this.getInstalledVersion();
+    const installedMetadata = await this.getInstalledBundleMetadata();
+    this.installedVersion = installedMetadata?.value || null;
     
-    if (!force && this.installedVersion === bundleVersion) {
+    const bundleHashMatches = !manifest.bundle_sha256 ||
+      installedMetadata?.bundleSha256 === manifest.bundle_sha256;
+
+    if (!force && this.installedVersion === bundleVersion && bundleHashMatches) {
       onProgress(100, 'Already up to date');
       this.catalog = await this.loadCatalogFromDB();
       this.fontsLoaded = true;
