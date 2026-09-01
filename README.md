@@ -1,3 +1,8 @@
+<!-- repo-hero -->
+<a href="https://fonts.noisefactor.io/"><img src="docs/hero.jpg" alt="Fontaine 100 free web fonts, curated" width="100%"></a>
+
+<sub>Open source from <a href="https://noisefactor.io">Noise Factor</a> &middot; <a href="https://github.com/noisefactorllc">more projects</a></sub>
+
 # fontaine
 
 **A curated collection of 100 freely distributable web fonts and an async, cache-aware bundler for JavaScript apps.**
