@@ -39,9 +39,13 @@ python3 build_bundle.py
 ```
 
 ### 3. Use in your app
+
+Serve the page, `font-loader.js`, and `bundle/` over HTTP or HTTPS.
+Use a module for the inline script so it can use top-level `await`.
+
 ```html
 <script src="font-loader.js"></script>
-<script>
+<script type="module">
   const loader = new FontLoader();
   
   await loader.load('./bundle', {
@@ -78,7 +82,7 @@ python3 build_bundle.py
 
 **Note:** This step is only required if you are modifying the curated font collection.
 
-Font metadata in the wild is often inconsistent or incorrect. To ensure reliable tagging, we use an AI helper script to visually classify fonts. These generated tags are included in the repo.
+Font metadata from external sources is often inconsistent or incorrect. To ensure reliable tagging, we use an AI helper script to visually classify fonts. The repo includes these generated tags.
 
 To enable AI-powered classification:
 
@@ -94,7 +98,7 @@ To enable AI-powered classification:
    python3 classify_fonts.py
    ```
 
-This generates a `style_cache.json` file. You can commit this file to source control so others don't need to run the classification.
+The classifier generates a `style_cache.json` file. You can commit this file to source control so others do not need to run the classifier.
 
 ### Manual Classification
 
@@ -142,7 +146,7 @@ await loader.load('./bundle', {
 });
 ```
 
-Returns `true` if fonts were downloaded, `false` if using cache.
+Returns `true` if it downloaded fonts, or `false` if it used the cache.
 
 #### `getFontsByTag(tag)`
 Get fonts with a specific tag.
@@ -219,7 +223,7 @@ await loader.clearCache();
 
 ## Demo
 
-Run the demo script to set up the environment, build the project, and serve the site:
+Run the demo script. It prepares the environment, builds the project, and serves the site:
 
 ```bash
 ./run_demo.sh
